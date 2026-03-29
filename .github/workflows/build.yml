@@ -1,0 +1,40 @@
+name: Build & Deploy EVI Dashboard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "data/EVI_2025-26.xlsx"   # only re-build when Excel changes
+      - "scripts/build.py"         # or when the build script changes
+
+  workflow_dispatch:               # allow manual trigger from GitHub UI
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write              # needed to push docs/ back to repo
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install openpyxl
+
+      - name: Build dashboard
+        run: python scripts/build.py
+
+      - name: Commit updated dashboard
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/index.html
+          git diff --cached --quiet || git commit -m "Auto-build dashboard [skip ci]"
+          git push
