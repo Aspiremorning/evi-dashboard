@@ -193,21 +193,21 @@ body{{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:
 .header .sub{{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.08em;margin-left:12px}}
 .header-right{{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:right;line-height:1.6}}
 .header-right strong{{color:var(--text);font-weight:500}}
-.wrapper{{max-width:1440px;margin:0 auto;padding:24px 32px}}
+.wrapper{{max-width:1440px;margin:0 auto;padding:12px 24px}}
 .data-note{{background:rgba(0,200,255,.05);border:1px solid rgba(0,200,255,.15);border-radius:6px;padding:12px 16px;font-size:12px;color:var(--muted);margin-bottom:20px;line-height:1.5}}
 .data-note strong{{color:var(--accent)}}
 .kpi-strip{{display:grid;grid-template-columns:repeat(8,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:20px}}
-.kpi-cell{{background:var(--bg2);padding:16px 14px;display:flex;flex-direction:column;gap:4px;transition:background .15s}}
+.kpi-cell{{background:var(--bg2);padding:10px 12px;display:flex;flex-direction:column;gap:3px;transition:background .15s}}
 .kpi-cell:hover{{background:var(--bg3)}}
 .kpi-label{{font-family:var(--mono);font-size:9px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}}
-.kpi-value{{font-family:var(--mono);font-size:20px;font-weight:600;color:var(--white);line-height:1}}
+.kpi-value{{font-family:var(--mono);font-size:17px;font-weight:600;color:var(--white);line-height:1}}
 .kpi-value.green{{color:var(--green)}}.kpi-value.red{{color:var(--red)}}.kpi-value.gold{{color:var(--gold)}}.kpi-value.accent{{color:var(--accent)}}
 .kpi-change{{font-family:var(--mono);font-size:10px;color:var(--muted)}}
 .kpi-change.up{{color:var(--green)}}.kpi-change.down{{color:var(--red)}}
-.section-title{{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}}
+.section-title{{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)}}
 .section-title span{{color:var(--accent);margin-right:8px}}
-.gauge-row{{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px}}
-.gauge-card{{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:20px}}
+.gauge-row{{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}}
+.gauge-card{{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px}}
 .gauge-title{{font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:12px}}
 .gauge-wrap{{display:flex;align-items:center;gap:14px}}
 .gauge-arc{{position:relative;width:72px;height:72px;flex-shrink:0}}
@@ -221,11 +221,11 @@ body{{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:
 .zone-cheap{{background:rgba(0,214,143,.15);color:var(--green)}}
 .zone-fair{{background:rgba(240,180,41,.15);color:var(--gold)}}
 .zone-rich{{background:rgba(255,92,106,.15);color:var(--red)}}
-.evi-score-card{{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:24px 28px;margin-bottom:20px;display:flex;align-items:center;gap:32px}}
-.evi-big{{font-family:var(--mono);font-size:64px;font-weight:600;line-height:1;background:linear-gradient(135deg,var(--accent),var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;min-width:160px}}
+.evi-score-card{{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 20px;margin-bottom:14px;display:flex;align-items:center;gap:24px}}
+.evi-big{{font-family:var(--mono);font-size:44px;font-weight:600;line-height:1;background:linear-gradient(135deg,var(--accent),var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;min-width:110px}}
 .evi-details{{flex:1}}
-.evi-headline{{font-size:18px;font-weight:500;color:var(--white);margin-bottom:6px}}
-.evi-desc{{font-size:13px;color:var(--muted);line-height:1.6;max-width:600px}}
+.evi-headline{{font-size:14px;font-weight:500;color:var(--white);margin-bottom:4px}}
+.evi-desc{{font-size:11px;color:var(--muted);line-height:1.5;max-width:600px}}
 .evi-bar-wrap{{flex:1;min-width:280px}}
 .evi-bar-bg{{height:10px;background:var(--border);border-radius:5px;overflow:hidden;margin-bottom:6px}}
 .evi-bar-fill{{height:100%;border-radius:5px;background:linear-gradient(90deg,var(--green),var(--gold),var(--red));position:relative}}
@@ -235,13 +235,13 @@ body{{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:
 .filter-btn{{font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.08em;padding:5px 12px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:all .15s}}
 .filter-btn:hover{{border-color:var(--accent);color:var(--accent)}}
 .filter-btn.active{{background:var(--accent);border-color:var(--accent);color:var(--bg)}}
-.charts-grid{{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}}
-.chart-card{{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:20px}}
+.charts-grid{{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}}
+.chart-card{{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 16px}}
 .chart-card.wide{{grid-column:span 2}}
 .chart-header{{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px}}
 .chart-title{{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--text)}}
 .chart-curr{{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--accent)}}
-.chart-canvas{{height:200px}}.chart-canvas.tall{{height:260px}}
+.chart-canvas{{height:160px}}.chart-canvas.tall{{height:200px}}
 .legend-row{{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px}}
 .legend-item{{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9px;color:var(--muted)}}
 .legend-dot{{width:8px;height:8px;border-radius:50%;flex-shrink:0}}
@@ -517,7 +517,58 @@ document.getElementById('filterRow').addEventListener('click',e=>{{
   updateAll(d);buildCharts(d);
 }});
 
-(function(){{const d=filterData(365);updateAll(d);buildCharts(d);}})();
+// Lazy load charts when they scroll into view
+function lazyBuildCharts(d){{
+  const canvases=['chartNifty','chartPE','chartEY','chartMCGDP','chartBEER','chartBond','chartDXY','chartUSDINR'];
+  const built=new Set();
+  const obs=new IntersectionObserver((entries)=>{{
+    entries.forEach(e=>{{
+      if(e.isIntersecting && !built.has(e.target.id)){{
+        built.add(e.target.id);
+        // rebuild just visible chart
+        buildCharts(d);
+      }}
+    }});
+  }},{{threshold:0.1}});
+  canvases.forEach(id=>{{
+    const el=document.getElementById(id);
+    if(el)obs.observe(el);
+  }});
+}}
+
+(function(){{
+  const d=filterData(365);
+  updateAll(d);
+  // Build first 3 charts immediately, rest lazy
+  const lbl=fmtLabels(d.dates);
+  const ctx=id=>document.getElementById(id).getContext('2d');
+  const ref=(arr,v)=>arr.map(()=>v);
+  const bo=baseOpts();
+
+  // Build visible charts first
+  queueChart(()=>{{if(charts.nifty)charts.nifty.destroy();charts.nifty=new Chart(ctx('chartNifty'),{{type:'line',data:{{labels:lbl,datasets:[lineDS(d.nifty50,'#00c8ff',true,ctx('chartNifty'))]}},options:bo}});}});
+  const peOpts={{...bo}};peOpts.scales={{...bo.scales,y:{{...bo.scales.y,min:15,max:30}}}};
+  queueChart(()=>{{if(charts.pe)charts.pe.destroy();charts.pe=new Chart(ctx('chartPE'),{{type:'line',data:{{labels:lbl,datasets:[lineDS(d.pe,'#00c8ff'),{{data:ref(d.pe,STATS.pe_median),borderColor:'#f0b42944',borderDash:[4,3],borderWidth:1,pointRadius:0,tension:0}}]}},options:peOpts}});}});
+  queueChart(()=>{{if(charts.ey)charts.ey.destroy();charts.ey=new Chart(ctx('chartEY'),{{type:'line',data:{{labels:lbl,datasets:[lineDS(d.earning_yield,'#00d68f',true,ctx('chartEY'))]}},options:bo}});}});
+
+  // Build bottom charts only when scrolled to
+  const bottomCharts=[
+    ['mcgdp','chartMCGDP'],['beer','chartBEER'],
+    ['bond','chartBond'],['dxy','chartDXY'],['usdinr','chartUSDINR']
+  ];
+  const obs=new IntersectionObserver((entries)=>{{
+    entries.forEach(e=>{{
+      if(e.isIntersecting){{
+        obs.unobserve(e.target);
+        buildCharts(d);
+      }}
+    }});
+  }},{{threshold:0.1,rootMargin:'100px'}});
+  bottomCharts.forEach(([,id])=>{{
+    const el=document.getElementById(id);
+    if(el)obs.observe(el);
+  }});
+}})();
 </script>
 </body>
 </html>
