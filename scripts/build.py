@@ -54,7 +54,7 @@ def extract_data(wb):
             "nifty50":            nifty,
             "pe":                 pe,
             "pb":                 v(13),
-            "eps":                v(10),
+            "eps":                v(10) if v(10) > 0 else round(nifty / pe, 4),
             "earning_yield":      v(9),
             "india_10yr":         v(11),
             "us_10yr":            v(16),
