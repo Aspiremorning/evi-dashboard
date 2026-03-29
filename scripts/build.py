@@ -365,7 +365,7 @@ const GRID={{color:'rgba(31,42,60,0.8)',lineWidth:1}};
 const TICK={{color:'#5a7089',maxTicksLimit:6}};
 
 function baseOpts(){{
-  return{{responsive:true,maintainAspectRatio:false,interaction:{{mode:'index',intersect:false}},
+  return{{responsive:true,maintainAspectRatio:false,animation:{{duration:300}},interaction:{{mode:'index',intersect:false}},
     plugins:{{legend:{{display:false}},tooltip:{{backgroundColor:'#111620',borderColor:'#1f2a3c',borderWidth:1,titleColor:'#c8d6e5',bodyColor:'#5a7089',padding:10}}}},
     scales:{{x:{{grid:GRID,ticks:{{...TICK,maxRotation:0,maxTicksLimit:8}}}},y:{{grid:GRID,ticks:TICK}}}}
   }};
@@ -472,17 +472,30 @@ function lineDS(data,color,fill,ctx){{
     borderWidth:1.5,pointRadius:0,tension:0.3,fill:!!fill}};
 }}
 
+// Chart build queue — builds one chart per animation frame so page stays responsive
+const _buildQueue=[];
+let _buildRunning=false;
+function queueChart(fn){{_buildQueue.push(fn);if(!_buildRunning)runQueue();}}
+function runQueue(){{
+  if(!_buildQueue.length){{_buildRunning=false;return;}}
+  _buildRunning=true;
+  const fn=_buildQueue.shift();
+  fn();
+  requestAnimationFrame(runQueue);
+}}
+
 function buildCharts(d){{
   const lbl=fmtLabels(d.dates);
   const rebuild=(key,id,datasets,opts)=>{{
-    if(charts[key])charts[key].destroy();
-    charts[key]=new Chart(document.getElementById(id).getContext('2d'),{{type:'line',data:{{labels:lbl,datasets}},options:opts}});
+    if(charts[key]){{charts[key].destroy();delete charts[key];}}
+    const canvas=document.getElementById(id);
+    queueChart(()=>{{charts[key]=new Chart(canvas.getContext('2d'),{{type:'line',data:{{labels:lbl,datasets}},options:opts}});}});
   }};
   const ctx=id=>document.getElementById(id).getContext('2d');
   const ref=(arr,v)=>arr.map(()=>v);
   const bo=baseOpts();
 
-  rebuild('nifty','chartNifty',[lineDS(d.nifty50,'#00c8ff',true,ctx('chartNifty'))],{{...bo,scales:{{...bo.scales,y:{{...bo.scales.y}}}}}});
+  rebuild('nifty','chartNifty',[lineDS(d.nifty50,'#00c8ff',true,ctx('chartNifty'))],{{...bo}});
   const peOpts={{...bo}};peOpts.scales={{...bo.scales,y:{{...bo.scales.y,min:15,max:30}}}};
   rebuild('pe','chartPE',[lineDS(d.pe,'#00c8ff'),{{data:ref(d.pe,STATS.pe_median),borderColor:'#f0b42944',borderDash:[4,3],borderWidth:1,pointRadius:0,tension:0}}],peOpts);
   rebuild('ey','chartEY',[lineDS(d.earning_yield,'#00d68f',true,ctx('chartEY'))],bo);
