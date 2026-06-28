@@ -97,6 +97,93 @@ def build_chart_data(rows):
             "midcap_eps","smallcap_eps"]
     return {k: pick(k) for k in keys}
 
+def compute_champion(rows):
+    """Backtest-derived Champion Signal: P/E + MarketCap/GDP composite.
+    Returns current score (0=cheap,100=expensive), bucket, expected 12M return,
+    and the historical quintile table."""
+    import statistics as _st
+    n = len(rows)
+    pe    = [r["pe"] for r in rows]
+    mcgdp = [r["marketcap_gdp"] if r["marketcap_gdp"] > 0 else None for r in rows]
+    nifty = [r["nifty50"] for r in rows]
+
+    # Forward 12M (252 trading day) returns
+    W = 252
+    fwd = [None]*n
+    for i in range(n - W):
+        if nifty[i] > 0:
+            fwd[i] = (nifty[i+W] - nifty[i]) / nifty[i] * 100
+
+    # Percentile rank helper (expensiveness: high value = high pct)
+    def pctile_series(arr):
+        valid = [x for x in arr if x is not None]
+        out = []
+        for x in arr:
+            if x is None:
+                out.append(None)
+            else:
+                out.append(sum(1 for y in valid if y <= x) / len(valid) * 100)
+        return out
+
+    pe_pct = pctile_series(pe)
+    mc_pct = pctile_series(mcgdp)
+
+    # Champion score = average of the two percentiles (skip missing)
+    champ = []
+    for i in range(n):
+        parts = [p for p in (pe_pct[i], mc_pct[i]) if p is not None]
+        champ.append(sum(parts)/len(parts) if parts else None)
+
+    # Quintile buckets vs forward 12M return
+    pairs = [(champ[i], fwd[i]) for i in range(n) if champ[i] is not None and fwd[i] is not None]
+    pairs.sort(key=lambda x: x[0])
+    buckets = []
+    if pairs:
+        cs = [p[0] for p in pairs]
+        edges = [_st.quantiles(cs, n=5)[k] for k in range(4)] if len(cs) >= 5 else []
+        def bucket_of(score):
+            if not edges: return 0
+            for k, e in enumerate(edges):
+                if score < e: return k
+            return 4
+        grp = {k: [] for k in range(5)}
+        for score, ret in pairs:
+            grp[bucket_of(score)].append(ret)
+        buckets = [round(sum(grp[k])/len(grp[k]), 1) if grp[k] else 0 for k in range(5)]
+    else:
+        edges = []
+
+    # Current reading (last non-null champ)
+    cur_score = next((champ[i] for i in range(n-1, -1, -1) if champ[i] is not None), 50)
+    def bucket_of2(score):
+        if not edges: return 2
+        for k, e in enumerate(edges):
+            if score < e: return k
+        return 4
+    cur_bucket = bucket_of2(cur_score)
+    exp_return = buckets[cur_bucket] if buckets else 0
+
+    # Hit rates
+    cheap = [r for s, r in pairs if s < 40]
+    exp   = [r for s, r in pairs if s > 60]
+    cheap_hit = round(sum(1 for x in cheap if x > 0)/len(cheap)*100) if cheap else 0
+    cheap_avg = round(sum(cheap)/len(cheap), 1) if cheap else 0
+    exp_hit   = round(sum(1 for x in exp if x > 0)/len(exp)*100) if exp else 0
+    exp_avg   = round(sum(exp)/len(exp), 1) if exp else 0
+
+    label = "CHEAP" if cur_score < 40 else "EXPENSIVE" if cur_score > 60 else "FAIR"
+    return {
+        "score": round(cur_score, 1),
+        "bucket": cur_bucket,
+        "label": label,
+        "exp_return": exp_return,
+        "buckets": buckets,
+        "cheap_hit": cheap_hit, "cheap_avg": cheap_avg,
+        "exp_hit": exp_hit, "exp_avg": exp_avg,
+        "pe_pctile": round(next((pe_pct[i] for i in range(n-1,-1,-1) if pe_pct[i] is not None), 50)),
+        "mc_pctile": round(next((mc_pct[i] for i in range(n-1,-1,-1) if mc_pct[i] is not None), 50)),
+    }
+
 def compute_stats(rows):
     def med(key):
         vals = [r[key] for r in rows if r[key] > 0]
@@ -128,90 +215,149 @@ HTML = r"""<!DOCTYPE html>
 <title>EVI Dashboard — __LAST_DATE__</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600;6..72,700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#0b0e14;--bg2:#111620;--bg3:#181e2c;--border:#1f2a3c;--accent:#00c8ff;--gold:#f0b429;--green:#00d68f;--red:#ff5c6a;--purple:#c084fc;--orange:#ff8c42;--text:#c8d6e5;--muted:#5a7089;--white:#eef4fb;}
-body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--text)}
-.hdr{background:var(--bg2);border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
-.hdr-t{font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:var(--accent);letter-spacing:.1em}
-.hdr-s{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);margin-left:10px}
-.hdr-r{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted)}
-.hdr-r strong{color:var(--white)}
-.wrap{max-width:1400px;margin:0 auto;padding:10px 16px}
+:root{
+  --bg:#f3efe4;--bg2:#fffefb;--bg3:#ece6d7;--bg4:#e3dcc9;
+  --border:#dcd3bf;--border2:#c8bda3;
+  --green:#1d4634;--green2:#2f6149;--green-dim:#5a7d6c;--green-deep:#13302339;
+  --brass:#9a7321;--brass2:#b8902f;--brass-dim:#c9b787;
+  --pos:#2c6e49;--neg:#a13c2b;--amber:#a8761f;--plum:#6b4a6e;--teal:#2a6f6b;
+  --text:#374a40;--text2:#6b7a6f;--muted:#9aa499;--ink:#15281e;
+  --mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif;--serif:'Newsreader',Georgia,serif;
+}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);
+  background-image:radial-gradient(ellipse 70% 40% at 50% -5%,rgba(154,115,33,0.06),transparent);}
 
-/* EVI */
-.evi-row{display:flex;gap:16px;align-items:center;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 16px;margin-bottom:10px}
-.evi-num{font-family:'IBM Plex Mono',monospace;font-size:40px;font-weight:600;line-height:1;background:linear-gradient(135deg,var(--accent),var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;min-width:80px}
+/* HEADER */
+.hdr{background:linear-gradient(180deg,#fffefb,#f8f4ea);border-bottom:1px solid var(--border);
+  padding:15px 30px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;
+  box-shadow:0 1px 0 rgba(154,115,33,0.18),0 2px 12px rgba(21,40,30,0.04)}
+.hdr-t{font-family:var(--serif);font-size:22px;font-weight:500;color:var(--ink);letter-spacing:.01em;font-style:italic}
+.hdr-t b{color:var(--green);font-style:normal;font-weight:700}
+.hdr-s{font-family:var(--mono);font-size:9px;color:var(--green-dim);margin-left:14px;letter-spacing:.22em;text-transform:uppercase;border-left:1px solid var(--border2);padding-left:14px}
+.hdr-r{font-family:var(--mono);font-size:10px;color:var(--text2);text-align:right;letter-spacing:.04em}
+.hdr-r strong{color:var(--brass);font-weight:600}
+.wrap{max-width:1480px;margin:0 auto;padding:18px 28px 40px}
+
+/* SECTION HEADERS */
+.sec{font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.28em;text-transform:uppercase;
+  color:var(--green-dim);margin:22px 0 12px;display:flex;align-items:center;gap:12px}
+.sec::before{content:'';width:5px;height:5px;background:var(--brass);transform:rotate(45deg);flex-shrink:0}
+.sec::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,var(--border2),transparent)}
+.sec span{color:var(--brass)}
+
+/* EVI COMPOSITE */
+.evi-row{display:flex;gap:22px;align-items:center;background:linear-gradient(135deg,#fffefb,#faf6ec);
+  border:1px solid var(--border);border-radius:10px;padding:14px 22px;margin-bottom:12px;position:relative;overflow:hidden;
+  box-shadow:0 1px 3px rgba(21,40,30,0.04)}
+.evi-row::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,var(--brass2),var(--brass))}
+.evi-num{font-family:var(--serif);font-size:46px;font-weight:600;line-height:1;color:var(--green);min-width:78px;font-feature-settings:'tnum'}
 .evi-txt{flex:1}
-.evi-hl{font-size:13px;font-weight:600;color:var(--white);margin-bottom:3px}
-.evi-desc{font-size:11px;color:var(--muted);line-height:1.4}
-.evi-bar-wrap{min-width:220px}
-.evi-bar-bg{height:8px;background:var(--border);border-radius:4px;margin-bottom:4px;position:relative}
-.evi-bar-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--green),var(--gold),var(--red))}
-.evi-dot{position:absolute;top:-4px;width:16px;height:16px;background:var(--white);border-radius:50%;border:2px solid var(--bg);transform:translateX(-50%);box-shadow:0 0 6px rgba(0,200,255,.5)}
-.evi-bar-lbl{display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:8px;color:var(--muted)}
+.evi-hl{font-family:var(--serif);font-size:17px;font-weight:600;color:var(--ink);margin-bottom:3px}
+.evi-desc{font-size:11px;color:var(--text2);line-height:1.5;max-width:560px}
+.evi-bar-wrap{min-width:240px}
+.evi-bar-bg{height:6px;background:var(--bg4);border-radius:3px;margin-bottom:6px;position:relative}
+.evi-bar-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--pos),var(--amber),var(--neg));opacity:.9}
+.evi-dot{position:absolute;top:-4px;width:14px;height:14px;background:#fffefb;border-radius:50%;border:2px solid var(--green);transform:translateX(-50%);box-shadow:0 0 0 1px var(--brass),0 2px 6px rgba(21,40,30,0.2)}
+.evi-bar-lbl{display:flex;justify-content:space-between;font-family:var(--mono);font-size:8px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase}
 
-/* KPI */
-.kpi-strip{display:grid;grid-template-columns:repeat(8,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:10px}
-.kpi{background:var(--bg2);padding:8px 10px}
-.kpi-l{font-family:'IBM Plex Mono',monospace;font-size:8px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:3px}
-.kpi-v{font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:600;color:var(--white);line-height:1}
-.kpi-v.g{color:var(--green)}.kpi-v.r{color:var(--red)}.kpi-v.gld{color:var(--gold)}.kpi-v.ac{color:var(--accent)}.kpi-v.pu{color:var(--purple)}
-.kpi-c{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);margin-top:2px}
-.kpi-c.up{color:var(--green)}.kpi-c.dn{color:var(--red)}
+/* CHAMPION SIGNAL — hero */
+.champ-row{display:grid;grid-template-columns:1.45fr 1fr;gap:12px;margin-bottom:12px}
+.champ-card{background:
+    radial-gradient(circle at 0% 0%,rgba(154,115,33,0.07),transparent 45%),
+    linear-gradient(135deg,#fffefb,#f9f5ea);
+  border:1px solid var(--border);border-radius:10px;padding:18px 22px;position:relative;
+  box-shadow:0 2px 8px rgba(21,40,30,0.05)}
+.champ-card::after{content:'';position:absolute;inset:0;border-radius:10px;padding:1px;
+  background:linear-gradient(135deg,rgba(154,115,33,0.4),transparent 42%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none}
+.champ-head{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.champ-badge{font-family:var(--mono);font-size:8px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;
+  color:#fffefb;background:linear-gradient(135deg,var(--green2),var(--green));padding:3px 9px;border-radius:3px;
+  box-shadow:0 1px 4px rgba(29,70,52,0.3)}
+.champ-title{font-family:var(--mono);font-size:9px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--green-dim)}
+.champ-main{display:flex;align-items:center;gap:24px}
+.champ-score{font-family:var(--serif);font-size:60px;font-weight:700;line-height:.9;min-width:96px;font-feature-settings:'tnum';
+  background:linear-gradient(160deg,var(--green2),var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.champ-detail{flex:1}
+.champ-label{font-family:var(--serif);font-size:16px;font-weight:600;margin-bottom:4px;letter-spacing:.01em}
+.champ-sub{font-size:11px;color:var(--text2);line-height:1.5}
+.champ-sub b{color:var(--ink);font-family:var(--mono);font-size:10px}
+.champ-exp{text-align:center;padding:10px 16px;background:rgba(44,110,73,0.07);border:1px solid rgba(44,110,73,0.2);border-radius:7px}
+.champ-exp-v{font-family:var(--serif);font-size:26px;font-weight:700;color:var(--green);line-height:1;font-feature-settings:'tnum'}
+.champ-exp-l{font-family:var(--mono);font-size:8px;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:.12em}
+.champ-buckets{display:flex;gap:5px;margin-top:12px}
+.cb{flex:1;text-align:center;padding:7px 2px;border-radius:5px;background:var(--bg3);border:1px solid transparent;transition:transform .15s}
+.cb.active{border-color:var(--brass);background:rgba(154,115,33,0.1);transform:translateY(-2px)}
+.cb-v{font-family:var(--mono);font-size:12px;font-weight:600}
+.cb-l{font-family:var(--mono);font-size:7px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.06em}
+.champ-hits{display:flex;flex-direction:column;justify-content:center;gap:14px;height:100%}
+.hit-row{display:flex;align-items:center;gap:12px}
+.hit-ball{width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:15px;font-weight:700;flex-shrink:0;border:1.5px solid currentColor}
+.hit-txt{font-size:11px;color:var(--text2);line-height:1.45}
+.hit-txt b{color:var(--ink);font-family:var(--mono);font-size:11px}
 
-/* SEC */
-.sec{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin:8px 0 6px;padding-bottom:5px;border-bottom:1px solid var(--border)}
-.sec span{color:var(--accent);margin-right:6px}
-
-/* GAUGES */
-.gauge-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
-.gauge-card{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px}
-.gauge-title{font-family:'IBM Plex Mono',monospace;font-size:8px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
-.gw{display:flex;align-items:center;gap:10px}
-.g-arc{position:relative;width:56px;height:56px;flex-shrink:0}
-.g-arc svg{width:100%;height:100%}
-.g-num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;color:var(--white);line-height:1}
-.g-pct{font-size:8px;color:var(--muted);margin-top:1px}
-.g-val{font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600;color:var(--white)}
-.g-med{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);margin-top:2px}
-.g-zone{display:inline-block;margin-top:5px;padding:2px 6px;border-radius:3px;font-family:'IBM Plex Mono',monospace;font-size:8px;font-weight:600;text-transform:uppercase}
-.zc{background:rgba(0,214,143,.15);color:var(--green)}.zf{background:rgba(240,180,41,.15);color:var(--gold)}.zr{background:rgba(255,92,106,.15);color:var(--red)}
+/* KPI STRIP */
+.kpi-strip{display:grid;grid-template-columns:repeat(8,1fr);gap:1px;background:var(--border);
+  border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:10px;box-shadow:0 1px 3px rgba(21,40,30,0.04)}
+.kpi{background:var(--bg2);padding:10px 12px;transition:background .15s}
+.kpi:hover{background:#fbf8f0}
+.kpi-l{font-family:var(--mono);font-size:8px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.kpi-v{font-family:var(--mono);font-size:16px;font-weight:600;color:var(--ink);line-height:1;font-feature-settings:'tnum'}
+.kpi-v.g{color:var(--pos)}.kpi-v.r{color:var(--neg)}.kpi-v.gld{color:var(--brass)}.kpi-v.ac{color:var(--teal)}.kpi-v.pu{color:var(--plum)}
+.kpi-c{font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px}
+.kpi-c.up{color:var(--pos)}.kpi-c.dn{color:var(--neg)}
 
 /* FILTER */
-.filter-row{display:flex;gap:5px;margin-bottom:8px}
-.fb{font-family:'IBM Plex Mono',monospace;font-size:9px;padding:4px 10px;border-radius:3px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:all .15s}
-.fb:hover{border-color:var(--accent);color:var(--accent)}.fb.on{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+.filter-row{display:flex;gap:6px;margin:14px 0 4px;align-items:center}
+.filter-row::before{content:'Range';font-family:var(--mono);font-size:8px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-right:6px}
+.fb{font-family:var(--mono);font-size:9px;font-weight:500;letter-spacing:.08em;padding:5px 13px;border-radius:4px;border:1px solid var(--border2);background:transparent;color:var(--text2);cursor:pointer;transition:all .15s}
+.fb:hover{border-color:var(--green);color:var(--green)}
+.fb.on{background:linear-gradient(135deg,var(--green2),var(--green));border-color:var(--green);color:#fffefb;font-weight:600}
 
-/* CHART GRIDS */
-.g2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}
-.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px}
-.g4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:8px}
-.cc{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px}
+/* GAUGES */
+.gauge-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px}
+.gauge-card{background:linear-gradient(135deg,#fffefb,#faf6ec);border:1px solid var(--border);border-radius:9px;padding:13px 15px;box-shadow:0 1px 3px rgba(21,40,30,0.04)}
+.gauge-title{font-family:var(--mono);font-size:8px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--green-dim);margin-bottom:10px}
+.gw{display:flex;align-items:center;gap:12px}
+.g-arc{position:relative;width:58px;height:58px;flex-shrink:0}
+.g-arc svg{width:100%;height:100%}
+.g-num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:var(--mono);font-size:12px;font-weight:600;color:var(--ink);line-height:1}
+.g-pct{font-size:7px;color:var(--muted);margin-top:2px;letter-spacing:.08em}
+.g-val{font-family:var(--serif);font-size:20px;font-weight:600;color:var(--ink);font-feature-settings:'tnum'}
+.g-med{font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:2px}
+.g-zone{display:inline-block;margin-top:6px;padding:2px 7px;border-radius:3px;font-family:var(--mono);font-size:8px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.zc{background:rgba(44,110,73,.14);color:var(--pos)}.zf{background:rgba(168,118,31,.16);color:var(--amber)}.zr{background:rgba(161,60,43,.14);color:var(--neg)}
+
+/* CHARTS */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px}
+.g4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px}
+.cc{background:linear-gradient(135deg,#fffefb,#faf6ec);border:1px solid var(--border);border-radius:9px;padding:12px 14px;transition:border-color .15s;box-shadow:0 1px 3px rgba(21,40,30,0.04)}
+.cc:hover{border-color:var(--border2)}
 .cc.sp2{grid-column:span 2}.cc.sp3{grid-column:span 3}
-.ch{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
-.ct{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text)}
-.cv{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;color:var(--accent)}
-.cw{height:130px;position:relative}
+.ch{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.ct{font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text)}
+.cv{font-family:var(--serif);font-size:15px;font-weight:600;color:var(--green);font-feature-settings:'tnum'}
+.cw{height:135px;position:relative}
 .cw canvas{position:absolute;top:0;left:0;width:100%;height:100%}
-.lgd{display:flex;gap:12px;margin-top:5px;flex-wrap:wrap}
-.li{display:flex;align-items:center;gap:4px;font-family:'IBM Plex Mono',monospace;font-size:8px;color:var(--muted)}
+.lgd{display:flex;gap:14px;margin-top:6px;flex-wrap:wrap}
+.li{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:8px;color:var(--muted);letter-spacing:.04em}
 .ld{width:7px;height:7px;border-radius:50%}
 
-/* Growth badge */
-.gbadge{display:inline-flex;align-items:center;gap:4px;font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;padding:1px 5px;border-radius:3px}
-.gbadge.pos{background:rgba(0,214,143,.15);color:var(--green)}.gbadge.neg{background:rgba(255,92,106,.15);color:var(--red)}
-
-@media(max-width:900px){.kpi-strip{grid-template-columns:repeat(4,1fr)}.gauge-row,.g3,.g4{grid-template-columns:repeat(2,1fr)}.g2{grid-template-columns:1fr}.cc.sp2,.cc.sp3{grid-column:span 1}}
+@media(max-width:980px){.kpi-strip{grid-template-columns:repeat(4,1fr)}.gauge-row,.g3,.g4{grid-template-columns:repeat(2,1fr)}.g2,.champ-row{grid-template-columns:1fr}.cc.sp2,.cc.sp3{grid-column:span 1}.champ-main{flex-wrap:wrap}}
+@media(max-width:560px){.kpi-strip,.gauge-row,.g3,.g4{grid-template-columns:1fr}.hdr{flex-direction:column;gap:8px;align-items:flex-start}.hdr-r{text-align:left}}
 </style>
 </head>
 <body>
 <div class="hdr">
   <div style="display:flex;align-items:baseline">
-    <span class="hdr-t">EVI // Equity Valuation Index</span>
+    <span class="hdr-t"><b>EVI</b> Equity Valuation Index</span>
     <span class="hdr-s">India Market Monitor</span>
   </div>
-  <div class="hdr-r"><strong>__LAST_DATE__</strong> &nbsp;|&nbsp; __DATE_FROM__ → __LAST_DATE__ &nbsp;|&nbsp; __TOTAL_ROWS__ trading days</div>
+  <div class="hdr-r">As of <strong>__LAST_DATE__</strong><br>__DATE_FROM__ &ndash; __LAST_DATE__ &middot; __TOTAL_ROWS__ sessions</div>
 </div>
 
 <div class="wrap">
@@ -223,6 +369,41 @@ body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--tex
     <div class="evi-bar-wrap">
       <div class="evi-bar-bg"><div class="evi-bar-fill" style="width:100%"></div><div class="evi-dot" id="eviDot"></div></div>
       <div class="evi-bar-lbl"><span>Cheap</span><span>Fair</span><span>Expensive</span></div>
+    </div>
+  </div>
+
+  <!-- CHAMPION SIGNAL -->
+  <div class="champ-row">
+    <div class="champ-card">
+      <div class="champ-head">
+        <span class="champ-badge">★ CFA Champion</span>
+        <span class="champ-title">Verified Valuation Signal — P/E + MarketCap/GDP</span>
+      </div>
+      <div class="champ-main">
+        <div class="champ-score" id="champScore">—</div>
+        <div class="champ-detail">
+          <div class="champ-label" id="champLabel">—</div>
+          <div class="champ-sub" id="champSub">—</div>
+          <div class="champ-buckets" id="champBuckets"></div>
+        </div>
+        <div class="champ-exp">
+          <div class="champ-exp-v" id="champExp">—</div>
+          <div class="champ-exp-l">Expected 12M return</div>
+        </div>
+      </div>
+    </div>
+    <div class="champ-card">
+      <div class="champ-head"><span class="champ-title">Historical Hit Rate (12M forward)</span></div>
+      <div class="champ-hits">
+        <div class="hit-row">
+          <div class="hit-ball" id="hitCheapBall" style="background:rgba(0,214,143,.18);color:var(--green)">—</div>
+          <div class="hit-txt">When signal reads <b>CHEAP</b> (&lt;40):<br>positive <b id="hitCheapPct">—</b> of the time · avg <b id="hitCheapAvg">—</b></div>
+        </div>
+        <div class="hit-row">
+          <div class="hit-ball" id="hitExpBall" style="background:rgba(255,92,106,.18);color:var(--red)">—</div>
+          <div class="hit-txt">When signal reads <b>EXPENSIVE</b> (&gt;60):<br>positive <b id="hitExpPct">—</b> of the time · avg <b id="hitExpAvg">—</b></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -260,16 +441,16 @@ body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--tex
   </div>
 
   <!-- GAUGES -->
-  <div class="sec"><span>◈</span>Valuation Gauges — Percentile Rank vs Full History</div>
+  <div class="sec">Valuation Gauges — Percentile Rank vs Full History</div>
   <div class="gauge-row">
-    <div class="gauge-card"><div class="gauge-title">P/E Ratio</div><div class="gw"><div class="g-arc"><svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="22" fill="none" stroke="#1f2a3c" stroke-width="6" stroke-dasharray="138.2" stroke-linecap="round" transform="rotate(-90 28 28)"/><circle cx="28" cy="28" r="22" fill="none" id="arcPE" stroke="#00c8ff" stroke-width="6" stroke-dasharray="138.2" stroke-dashoffset="138.2" stroke-linecap="round" transform="rotate(-90 28 28)"/></svg><div class="g-num"><span id="pPE">—</span><span class="g-pct">%ile</span></div></div><div><div class="g-val" id="vPE">—</div><div class="g-med">Med: __PE_MED__</div><div class="g-zone" id="zPE">—</div></div></div></div>
-    <div class="gauge-card"><div class="gauge-title">BEER Ratio</div><div class="gw"><div class="g-arc"><svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="22" fill="none" stroke="#1f2a3c" stroke-width="6" stroke-dasharray="138.2" stroke-linecap="round" transform="rotate(-90 28 28)"/><circle cx="28" cy="28" r="22" fill="none" id="arcBEER" stroke="#f0b429" stroke-width="6" stroke-dasharray="138.2" stroke-dashoffset="138.2" stroke-linecap="round" transform="rotate(-90 28 28)"/></svg><div class="g-num"><span id="pBEER">—</span><span class="g-pct">%ile</span></div></div><div><div class="g-val" id="vBEER">—</div><div class="g-med">Med: __BEER_MED__</div><div class="g-zone" id="zBEER">—</div></div></div></div>
-    <div class="gauge-card"><div class="gauge-title">MC / GDP %</div><div class="gw"><div class="g-arc"><svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="22" fill="none" stroke="#1f2a3c" stroke-width="6" stroke-dasharray="138.2" stroke-linecap="round" transform="rotate(-90 28 28)"/><circle cx="28" cy="28" r="22" fill="none" id="arcMC" stroke="#ff5c6a" stroke-width="6" stroke-dasharray="138.2" stroke-dashoffset="138.2" stroke-linecap="round" transform="rotate(-90 28 28)"/></svg><div class="g-num"><span id="pMC">—</span><span class="g-pct">%ile</span></div></div><div><div class="g-val" id="vMC">—</div><div class="g-med">Med: __MCGDP_MED__%</div><div class="g-zone" id="zMC">—</div></div></div></div>
-    <div class="gauge-card"><div class="gauge-title">Yield Gap (EY−Bond)</div><div class="gw"><div class="g-arc"><svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="22" fill="none" stroke="#1f2a3c" stroke-width="6" stroke-dasharray="138.2" stroke-linecap="round" transform="rotate(-90 28 28)"/><circle cx="28" cy="28" r="22" fill="none" id="arcYG" stroke="#00d68f" stroke-width="6" stroke-dasharray="138.2" stroke-dashoffset="138.2" stroke-linecap="round" transform="rotate(-90 28 28)"/></svg><div class="g-num"><span id="pYG">—</span><span class="g-pct">%ile</span></div></div><div><div class="g-val" id="vYG">—</div><div class="g-med">Med: __YG_MED__%</div><div class="g-zone" id="zYG">—</div></div></div></div>
+    <div class="gauge-card"><div class="gauge-title">P/E Ratio</div><div class="gw"><div class="g-arc"><svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="22" fill="none" stroke="#e3dcc9" stroke-width="6" stroke-dasharray="138.2" stroke-linecap="round" transform="rotate(-90 28 28)"/><circle cx="28" cy="28" r="22" fill="none" id="arcPE" stroke="#1d4634" stroke-width="6" stroke-dasharray="138.2" stroke-dashoffset="138.2" stroke-linecap="round" transform="rotate(-90 28 28)"/></svg><div class="g-num"><span id="pPE">—</span><span class="g-pct">%ile</span></div></div><div><div class="g-val" id="vPE">—</div><div class="g-med">Med: __PE_MED__</div><div class="g-zone" id="zPE">—</div></div></div></div>
+    <div class="gauge-card"><div class="gauge-title">BEER Ratio</div><div class="gw"><div class="g-arc"><svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="22" fill="none" stroke="#e3dcc9" stroke-width="6" stroke-dasharray="138.2" stroke-linecap="round" transform="rotate(-90 28 28)"/><circle cx="28" cy="28" r="22" fill="none" id="arcBEER" stroke="#9a7321" stroke-width="6" stroke-dasharray="138.2" stroke-dashoffset="138.2" stroke-linecap="round" transform="rotate(-90 28 28)"/></svg><div class="g-num"><span id="pBEER">—</span><span class="g-pct">%ile</span></div></div><div><div class="g-val" id="vBEER">—</div><div class="g-med">Med: __BEER_MED__</div><div class="g-zone" id="zBEER">—</div></div></div></div>
+    <div class="gauge-card"><div class="gauge-title">MC / GDP %</div><div class="gw"><div class="g-arc"><svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="22" fill="none" stroke="#e3dcc9" stroke-width="6" stroke-dasharray="138.2" stroke-linecap="round" transform="rotate(-90 28 28)"/><circle cx="28" cy="28" r="22" fill="none" id="arcMC" stroke="#a13c2b" stroke-width="6" stroke-dasharray="138.2" stroke-dashoffset="138.2" stroke-linecap="round" transform="rotate(-90 28 28)"/></svg><div class="g-num"><span id="pMC">—</span><span class="g-pct">%ile</span></div></div><div><div class="g-val" id="vMC">—</div><div class="g-med">Med: __MCGDP_MED__%</div><div class="g-zone" id="zMC">—</div></div></div></div>
+    <div class="gauge-card"><div class="gauge-title">Yield Gap (EY−Bond)</div><div class="gw"><div class="g-arc"><svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="22" fill="none" stroke="#e3dcc9" stroke-width="6" stroke-dasharray="138.2" stroke-linecap="round" transform="rotate(-90 28 28)"/><circle cx="28" cy="28" r="22" fill="none" id="arcYG" stroke="#2c6e49" stroke-width="6" stroke-dasharray="138.2" stroke-dashoffset="138.2" stroke-linecap="round" transform="rotate(-90 28 28)"/></svg><div class="g-num"><span id="pYG">—</span><span class="g-pct">%ile</span></div></div><div><div class="g-val" id="vYG">—</div><div class="g-med">Med: __YG_MED__%</div><div class="g-zone" id="zYG">—</div></div></div></div>
   </div>
 
   <!-- SECTION 1: NIFTY -->
-  <div class="sec"><span>◈</span>Nifty 50 Valuation</div>
+  <div class="sec">Nifty 50 Valuation</div>
   <div class="g3">
     <div class="cc sp2"><div class="ch"><span class="ct">Nifty 50 Index</span><span class="cv" id="cN">—</span></div><div class="cw"><canvas id="cNifty"></canvas></div></div>
     <div class="cc"><div class="ch"><span class="ct">P/E Ratio</span><span class="cv" id="cPE">—</span></div><div class="cw"><canvas id="cPEchart"></canvas></div></div>
@@ -282,7 +463,7 @@ body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--tex
   </div>
 
   <!-- SECTION 2: MIDCAP & SMALLCAP -->
-  <div class="sec"><span>◈</span>Midcap 150 &amp; Smallcap 250 — Earning Yield &amp; PREITY</div>
+  <div class="sec">Midcap 150 &amp; Smallcap 250 — Earning Yield &amp; PREITY</div>
   <div class="g3">
     <div class="cc"><div class="ch"><span class="ct">Midcap 150 Earning Yield %</span><span class="cv" id="cMEY">—</span></div><div class="cw"><canvas id="cMEYchart"></canvas></div></div>
     <div class="cc"><div class="ch"><span class="ct">Smallcap 250 Earning Yield %</span><span class="cv" id="cSEY">—</span></div><div class="cw"><canvas id="cSEYchart"></canvas></div></div>
@@ -290,7 +471,7 @@ body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--tex
   </div>
 
   <!-- SECTION 3: EPS GROWTH -->
-  <div class="sec"><span>◈</span>EPS — Nifty 50 YoY Growth &amp; Midcap / Smallcap EPS Level</div>
+  <div class="sec">EPS — Nifty 50 YoY Growth &amp; Midcap / Smallcap EPS Level</div>
   <div class="g3">
     <div class="cc"><div class="ch"><span class="ct">Nifty 50 EPS Growth % (YoY)</span><span class="cv" id="cNEG">—</span></div><div class="cw"><canvas id="cNEGchart"></canvas></div></div>
     <div class="cc"><div class="ch"><span class="ct">Midcap 150 EPS Level</span><span class="cv" id="cMEG">—</span></div><div class="cw"><canvas id="cMEGchart"></canvas></div></div>
@@ -298,9 +479,9 @@ body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--tex
   </div>
 
   <!-- SECTION 4: BONDS & FX -->
-  <div class="sec"><span>◈</span>Bond Yields &amp; Dollar Index</div>
+  <div class="sec">Bond Yields &amp; Dollar Index</div>
   <div class="g3">
-    <div class="cc sp2"><div class="ch"><span class="ct">India 10yr vs US 10yr &amp; Yield Gap</span><span class="cv" id="cBond">—</span></div><div class="cw"><canvas id="cBondchart"></canvas></div><div class="lgd"><div class="li"><div class="ld" style="background:#f0b429"></div>India 10yr</div><div class="li"><div class="ld" style="background:#00c8ff"></div>US 10yr</div><div class="li"><div class="ld" style="background:#00d68f"></div>Yield Gap</div></div></div>
+    <div class="cc sp2"><div class="ch"><span class="ct">India 10yr vs US 10yr &amp; Yield Gap</span><span class="cv" id="cBond">—</span></div><div class="cw"><canvas id="cBondchart"></canvas></div><div class="lgd"><div class="li"><div class="ld" style="background:#9a7321"></div>India 10yr</div><div class="li"><div class="ld" style="background:#1d4634"></div>US 10yr</div><div class="li"><div class="ld" style="background:#2c6e49"></div>Yield Gap</div></div></div>
     <div class="cc"><div class="ch"><span class="ct">USD / INR</span><span class="cv" id="cFX">—</span></div><div class="cw"><canvas id="cFXchart"></canvas></div></div>
   </div>
 
@@ -309,19 +490,20 @@ body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--tex
 <script>
 const RAW=__CHART_DATA__;
 const STATS=__STATS_DATA__;
+const CHAMP=__CHAMP_DATA__;
 
-Chart.defaults.color='#5a7089';
+Chart.defaults.color='#9aa499';
 Chart.defaults.font.family="'IBM Plex Mono',monospace";
 Chart.defaults.font.size=9;
 Chart.defaults.animation={duration:200};
 
-const GRID={color:'rgba(31,42,60,0.9)',lineWidth:1};
-const TICK={color:'#5a7089',maxTicksLimit:5};
+const GRID={color:'rgba(220,211,191,0.7)',lineWidth:1};
+const TICK={color:'#9aa499',maxTicksLimit:5};
 
 function bo(){
   return{responsive:true,maintainAspectRatio:false,
     interaction:{mode:'index',intersect:false},
-    plugins:{legend:{display:false},tooltip:{backgroundColor:'#111620',borderColor:'#1f2a3c',borderWidth:1,titleColor:'#c8d6e5',bodyColor:'#5a7089',padding:8}},
+    plugins:{legend:{display:false},tooltip:{backgroundColor:'#fffefb',borderColor:'#dcd3bf',borderWidth:1,titleColor:'#15281e',bodyColor:'#6b7a6f',padding:8}},
     scales:{x:{grid:GRID,ticks:{...TICK,maxRotation:0,maxTicksLimit:6}},y:{grid:GRID,ticks:TICK}}};
 }
 
@@ -336,7 +518,7 @@ function lds(data,color,fill,id){
 }
 
 function barDs(data,color){
-  return{type:'bar',data,backgroundColor:data.map(v=>v>=0?color+'99':v<0?'#ff5c6a99':color+'99'),borderColor:data.map(v=>v>=0?color:'#ff5c6a'),borderWidth:1,borderRadius:2};
+  return{type:'bar',data,backgroundColor:data.map(v=>v>=0?color+'99':v<0?'#ff5c6a99':color+'99'),borderColor:data.map(v=>v>=0?color:'#a13c2b'),borderWidth:1,borderRadius:2};
 }
 
 function lbl(dates){
@@ -415,10 +597,10 @@ function updateKPIs(d){
   set('cSEG',d.smallcap_eps[n].toFixed(1));
 
   const peArr=RAW.pe,beerArr=RAW.beer.filter(x=>x>0),mcArr=RAW.marketcap_gdp.filter(x=>x>0),ygArr=RAW.yield_gap;
-  setGauge('arcPE','pPE','vPE','zPE',pct(peArr,pe),pe,false,'#00c8ff');
-  setGauge('arcBEER','pBEER','vBEER','zBEER',pct(beerArr,beer),beer,true,'#f0b429');
-  setGauge('arcMC','pMC','vMC','zMC',pct(mcArr,mc),mc,false,'#ff5c6a');
-  setGauge('arcYG','pYG','vYG','zYG',pct(ygArr,yg),yg,true,'#00d68f');
+  setGauge('arcPE','pPE','vPE','zPE',pct(peArr,pe),pe,false,'#1d4634');
+  setGauge('arcBEER','pBEER','vBEER','zBEER',pct(beerArr,beer),beer,true,'#9a7321');
+  setGauge('arcMC','pMC','vMC','zMC',pct(mcArr,mc),mc,false,'#a13c2b');
+  setGauge('arcYG','pYG','vYG','zYG',pct(ygArr,yg),yg,true,'#2c6e49');
 
   const score=Math.round((pct(peArr,pe)+(100-pct(beerArr,beer))+pct(mcArr,mc)+(100-pct(ygArr,yg)))/4);
   set('eviNum',score);document.getElementById('eviDot').style.left=score+'%';
@@ -448,17 +630,17 @@ function buildCharts(d){
     charts[key]=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels,datasets},options:opts});
   }
 
-  mk('nifty','cNifty',[lds(d.nifty50,'#00c8ff',true,'cNifty')]);
-  mk('pe','cPEchart',[lds(d.pe,'#00c8ff',false),{data:ref(d.pe,STATS.pe_median),borderColor:'#f0b42966',borderDash:[4,3],borderWidth:1,pointRadius:0,tension:0}],{min:15,max:30});
-  mk('ey','cEYchart',[lds(d.earning_yield,'#00d68f',true,'cEYchart')]);
-  mk('beer','cBEERchart',[lds(d.beer,'#f0b429',false),{data:ref(d.beer,1.0),borderColor:'#ff5c6a66',borderDash:[4,3],borderWidth:1,pointRadius:0,tension:0},{data:ref(d.beer,STATS.beer_median),borderColor:'#00d68f66',borderDash:[4,3],borderWidth:1,pointRadius:0,tension:0}],{min:0.4,max:2.0});
-  mk('mc','cMCchart',[lds(d.marketcap_gdp,'#ff5c6a',false),{data:ref(d.marketcap_gdp,STATS.mcgdp_median),borderColor:'#f0b42966',borderDash:[4,3],borderWidth:1,pointRadius:0,tension:0}],{min:80,max:170});
-  mk('mct','cMCTchart',[lds(d.marketcap_trillion,'#00c8ff',true,'cMCTchart')]);
-  mk('mey','cMEYchart',[lds(d.midcap_earn_yield,'#00d68f',true,'cMEYchart')]);
-  mk('sey','cSEYchart',[lds(d.smallcap_earn_yield,'#c084fc',true,'cSEYchart')]);
-  mk('preity','cPREITYchart',[lds(d.preity,'#ff8c42',true,'cPREITYchart')]);
-  mk('bond','cBondchart',[lds(d.india_10yr,'#f0b429',false),lds(d.us_10yr,'#00c8ff',false),lds(d.yield_gap,'#00d68f',true,'cBondchart')]);
-  mk('fx','cFXchart',[lds(d.usdinr,'#c084fc',true,'cFXchart')]);
+  mk('nifty','cNifty',[lds(d.nifty50,'#1d4634',true,'cNifty')]);
+  mk('pe','cPEchart',[lds(d.pe,'#1d4634',false),{data:ref(d.pe,STATS.pe_median),borderColor:'#9a732166',borderDash:[4,3],borderWidth:1,pointRadius:0,tension:0}],{min:15,max:30});
+  mk('ey','cEYchart',[lds(d.earning_yield,'#2c6e49',true,'cEYchart')]);
+  mk('beer','cBEERchart',[lds(d.beer,'#9a7321',false),{data:ref(d.beer,1.0),borderColor:'#a13c2b66',borderDash:[4,3],borderWidth:1,pointRadius:0,tension:0},{data:ref(d.beer,STATS.beer_median),borderColor:'#2c6e4966',borderDash:[4,3],borderWidth:1,pointRadius:0,tension:0}],{min:0.4,max:2.0});
+  mk('mc','cMCchart',[lds(d.marketcap_gdp,'#a13c2b',false),{data:ref(d.marketcap_gdp,STATS.mcgdp_median),borderColor:'#9a732166',borderDash:[4,3],borderWidth:1,pointRadius:0,tension:0}],{min:80,max:170});
+  mk('mct','cMCTchart',[lds(d.marketcap_trillion,'#1d4634',true,'cMCTchart')]);
+  mk('mey','cMEYchart',[lds(d.midcap_earn_yield,'#2c6e49',true,'cMEYchart')]);
+  mk('sey','cSEYchart',[lds(d.smallcap_earn_yield,'#6b4a6e',true,'cSEYchart')]);
+  mk('preity','cPREITYchart',[lds(d.preity,'#a8761f',true,'cPREITYchart')]);
+  mk('bond','cBondchart',[lds(d.india_10yr,'#9a7321',false),lds(d.us_10yr,'#1d4634',false),lds(d.yield_gap,'#2c6e49',true,'cBondchart')]);
+  mk('fx','cFXchart',[lds(d.usdinr,'#6b4a6e',true,'cFXchart')]);
 
   // EPS Growth bars — skip zero values (first year has no data)
   const negData=d.nifty_eps_growth.map(v=>v===0?null:v);
@@ -472,13 +654,13 @@ function buildCharts(d){
     opts.plugins.tooltip.callbacks={label:ctx=>(ctx.parsed.y>=0?'+':'')+ctx.parsed.y.toFixed(1)+'%'};
     charts[key]=new Chart(canvas.getContext('2d'),{
       type:'bar',
-      data:{labels,datasets:[{data,backgroundColor:data.map(v=>v===null?'transparent':v>=0?color+'99':'#ff5c6a99'),borderColor:data.map(v=>v===null?'transparent':v>=0?color:'#ff5c6a'),borderWidth:1,borderRadius:2}]},
+      data:{labels,datasets:[{data,backgroundColor:data.map(v=>v===null?'transparent':v>=0?color+'99':'#ff5c6a99'),borderColor:data.map(v=>v===null?'transparent':v>=0?color:'#a13c2b'),borderWidth:1,borderRadius:2}]},
       options:opts
     });
   }
-  growthBar('neg','cNEGchart',negData,'#00c8ff');
-  mk('meg','cMEGchart',[lds(d.midcap_eps,'#00d68f',true,'cMEGchart')]);
-  mk('seg','cSEGchart',[lds(d.smallcap_eps,'#c084fc',true,'cSEGchart')]);
+  growthBar('neg','cNEGchart',negData,'#1d4634');
+  mk('meg','cMEGchart',[lds(d.midcap_eps,'#2c6e49',true,'cMEGchart')]);
+  mk('seg','cSEGchart',[lds(d.smallcap_eps,'#6b4a6e',true,'cSEGchart')]);
 }
 
 function refresh(range){
@@ -492,6 +674,42 @@ document.getElementById('fr').addEventListener('click',e=>{
   document.querySelectorAll('.fb').forEach(b=>b.classList.remove('on'));
   btn.classList.add('on');refresh(parseInt(btn.dataset.r));
 });
+
+function renderChampion(){
+  const c=CHAMP;
+  const el=document.getElementById('champScore');
+  el.textContent=c.score.toFixed(0);
+  const col=c.score<40?'var(--green)':c.score>60?'var(--red)':'var(--gold)';
+  el.style.background='linear-gradient(135deg,'+col+',var(--accent))';
+  el.style.webkitBackgroundClip='text';el.style.webkitTextFillColor='transparent';el.style.backgroundClip='text';
+  document.getElementById('champLabel').textContent=c.label+' — '+(c.label==='CHEAP'?'Strong entry zone':c.label==='EXPENSIVE'?'Caution, thin margin of safety':'Balanced risk-reward');
+  document.getElementById('champLabel').style.color=col;
+  document.getElementById('champSub').innerHTML='P/E percentile <b>'+c.pe_pctile+'</b> · MarketCap/GDP percentile <b>'+c.mc_pctile+'</b> &nbsp;|&nbsp; 0 = cheapest, 100 = most expensive in history';
+  const expEl=document.getElementById('champExp');
+  expEl.textContent=(c.exp_return>=0?'+':'')+c.exp_return.toFixed(1)+'%';
+  expEl.style.color=c.exp_return>=12?'var(--green)':c.exp_return>=6?'var(--gold)':'var(--red)';
+
+  // buckets
+  const labels=['Cheapest','Q2','Q3','Q4','Priciest'];
+  const bc=document.getElementById('champBuckets');
+  bc.innerHTML='';
+  c.buckets.forEach((v,i)=>{
+    const d=document.createElement('div');
+    d.className='cb'+(i===c.bucket?' active':'');
+    const vc=v>=12?'var(--green)':v>=6?'var(--gold)':'var(--red)';
+    d.innerHTML='<div class="cb-v" style="color:'+vc+'">'+(v>=0?'+':'')+v.toFixed(0)+'%</div><div class="cb-l">'+labels[i]+'</div>';
+    bc.appendChild(d);
+  });
+
+  // hit rates
+  document.getElementById('hitCheapBall').textContent=c.cheap_hit+'%';
+  document.getElementById('hitCheapPct').textContent=c.cheap_hit+'%';
+  document.getElementById('hitCheapAvg').textContent=(c.cheap_avg>=0?'+':'')+c.cheap_avg+'%';
+  document.getElementById('hitExpBall').textContent=c.exp_hit+'%';
+  document.getElementById('hitExpPct').textContent=c.exp_hit+'%';
+  document.getElementById('hitExpAvg').textContent=(c.exp_avg>=0?'+':'')+c.exp_avg+'%';
+}
+renderChampion();
 
 refresh(365);
 </script>
@@ -510,6 +728,7 @@ def main():
     print(f"    {len(rows)} rows  |  {rows[0]['date']} → {rows[-1]['date']}")
     cd    = build_chart_data(rows)
     stats = compute_stats(rows)
+    champ = compute_champion(rows)
     html = HTML
     html = html.replace("__LAST_DATE__",   stats["last_date"])
     html = html.replace("__DATE_FROM__",   stats["date_from"])
@@ -520,11 +739,13 @@ def main():
     html = html.replace("__YG_MED__",      str(stats["yg_median"]))
     html = html.replace("__CHART_DATA__",  json.dumps(cd))
     html = html.replace("__STATS_DATA__",  json.dumps(stats))
+    html = html.replace("__CHAMP_DATA__",  json.dumps(champ))
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(html, encoding="utf-8")
     print(f"✅  Dashboard → {OUTPUT}  ({OUTPUT.stat().st_size//1024} KB)")
     print(f"    Nifty {stats['nifty']:,.0f}  |  PE {stats['pe']:.2f}  |  MC ${stats['marketcap_trillion']:.2f}T")
     print(f"    Midcap EY {stats['midcap_earn_yield']:.2f}%  |  SC EY {stats['smallcap_earn_yield']:.2f}%")
+    print(f"    Champion Signal: {champ['score']:.0f}/100 ({champ['label']})  →  expected 12M return {champ['exp_return']:+.1f}%")
     print(f"    EPS Growth (Nifty YoY): {stats['nifty_eps_growth']:.1f}%  |  Midcap EPS: {stats['midcap_eps']:.1f}  SC EPS: {stats['smallcap_eps']:.1f}")
 
 if __name__ == "__main__":
