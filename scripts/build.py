@@ -77,13 +77,15 @@ def extract_data(wb):
             "smallcap_earn_yield":v(28),
         })
 
-    # Calculate YoY EPS growth - Nifty 50 only (Midcap/SC Index/PE EPS is unreliable for YoY)
+    # Calculate YoY EPS growth (252 trading days back) for all three indices
     for i, r in enumerate(rows):
         if i >= WINDOW:
             prev = rows[i - WINDOW]
-            r["nifty_eps_growth"] = round((r["eps"] - prev["eps"]) / prev["eps"] * 100, 2) if prev["eps"] > 0 else 0
+            r["nifty_eps_growth"]    = round((r["eps"]          - prev["eps"])          / prev["eps"]          * 100, 2) if prev["eps"]          > 0 else 0
+            r["midcap_eps_growth"]   = round((r["midcap_eps"]   - prev["midcap_eps"])   / prev["midcap_eps"]   * 100, 2) if prev["midcap_eps"]   > 0 else 0
+            r["smallcap_eps_growth"] = round((r["smallcap_eps"] - prev["smallcap_eps"]) / prev["smallcap_eps"] * 100, 2) if prev["smallcap_eps"] > 0 else 0
         else:
-            r["nifty_eps_growth"] = 0
+            r["nifty_eps_growth"] = r["midcap_eps_growth"] = r["smallcap_eps_growth"] = 0
     return rows
 
 def build_chart_data(rows):
@@ -91,10 +93,11 @@ def build_chart_data(rows):
     thin_idx = list(range(0, max(0, n - 90), 3)) + list(range(max(0, n - 90), n))
     def pick(key):
         return [round(rows[i][key], 4) if isinstance(rows[i][key], float) else rows[i][key] for i in thin_idx]
-    keys = ["date","nifty50","pe","pb","earning_yield","india_10yr","us_10yr","yield_gap",
+    keys = ["date","nifty50","midcap150","smallcap250","pe","pb","earning_yield","india_10yr","us_10yr","yield_gap",
             "usdinr","dollar_index","marketcap_gdp","marketcap_trillion","beer","preity",
-            "midcap_earn_yield","smallcap_earn_yield","nifty_eps_growth",
-            "midcap_eps","smallcap_eps"]
+            "midcap_earn_yield","smallcap_earn_yield",
+            "eps","midcap_eps","smallcap_eps",
+            "nifty_eps_growth","midcap_eps_growth","smallcap_eps_growth"]
     return {k: pick(k) for k in keys}
 
 def compute_champion(rows):
@@ -200,9 +203,12 @@ def compute_stats(rows):
         "preity": latest["preity"],
         "midcap_earn_yield": latest["midcap_earn_yield"],
         "smallcap_earn_yield": latest["smallcap_earn_yield"],
+        "nifty_eps": latest["eps"],
         "nifty_eps_growth": latest["nifty_eps_growth"],
         "midcap_eps": latest["midcap_eps"],
+        "midcap_eps_growth": latest["midcap_eps_growth"],
         "smallcap_eps": latest["smallcap_eps"],
+        "smallcap_eps_growth": latest["smallcap_eps_growth"],
         "pe_median": med("pe"), "beer_median": med("beer"),
         "mcgdp_median": med("marketcap_gdp"), "yg_median": med("yield_gap"),
     }
@@ -449,31 +455,50 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);
     <div class="gauge-card"><div class="gauge-title">Yield Gap (EY−Bond)</div><div class="gw"><div class="g-arc"><svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="22" fill="none" stroke="#e3dcc9" stroke-width="6" stroke-dasharray="138.2" stroke-linecap="round" transform="rotate(-90 28 28)"/><circle cx="28" cy="28" r="22" fill="none" id="arcYG" stroke="#2c6e49" stroke-width="6" stroke-dasharray="138.2" stroke-dashoffset="138.2" stroke-linecap="round" transform="rotate(-90 28 28)"/></svg><div class="g-num"><span id="pYG">—</span><span class="g-pct">%ile</span></div></div><div><div class="g-val" id="vYG">—</div><div class="g-med">Med: __YG_MED__%</div><div class="g-zone" id="zYG">—</div></div></div></div>
   </div>
 
-  <!-- SECTION 1: NIFTY -->
-  <div class="sec">Nifty 50 Valuation</div>
+  <!-- SECTION: INDEX LEVELS -->
+  <div class="sec">Index Levels — Nifty 50 · Midcap 150 · Smallcap 250</div>
   <div class="g3">
-    <div class="cc sp2"><div class="ch"><span class="ct">Nifty 50 Index</span><span class="cv" id="cN">—</span></div><div class="cw"><canvas id="cNifty"></canvas></div></div>
-    <div class="cc"><div class="ch"><span class="ct">P/E Ratio</span><span class="cv" id="cPE">—</span></div><div class="cw"><canvas id="cPEchart"></canvas></div></div>
-  </div>
-  <div class="g4">
-    <div class="cc"><div class="ch"><span class="ct">Earning Yield %</span><span class="cv" id="cEY">—</span></div><div class="cw"><canvas id="cEYchart"></canvas></div></div>
-    <div class="cc"><div class="ch"><span class="ct">BEER Ratio</span><span class="cv" id="cBEER">—</span></div><div class="cw"><canvas id="cBEERchart"></canvas></div></div>
-    <div class="cc"><div class="ch"><span class="ct">MC/GDP % (Buffett)</span><span class="cv" id="cMC">—</span></div><div class="cw"><canvas id="cMCchart"></canvas></div></div>
-    <div class="cc"><div class="ch"><span class="ct">Market Cap (USD T)</span><span class="cv" id="cMCT">—</span></div><div class="cw"><canvas id="cMCTchart"></canvas></div></div>
+    <div class="cc"><div class="ch"><span class="ct">Nifty 50 Index</span><span class="cv" id="cN">—</span></div><div class="cw"><canvas id="cNifty"></canvas></div></div>
+    <div class="cc"><div class="ch"><span class="ct">Nifty Midcap 150 Index</span><span class="cv" id="cMID">—</span></div><div class="cw"><canvas id="cMidchart"></canvas></div></div>
+    <div class="cc"><div class="ch"><span class="ct">Nifty Smallcap 250 Index</span><span class="cv" id="cSC">—</span></div><div class="cw"><canvas id="cSCchart"></canvas></div></div>
   </div>
 
-  <!-- SECTION 2: MIDCAP & SMALLCAP -->
-  <div class="sec">Midcap 150 &amp; Smallcap 250 — Earning Yield &amp; PREITY</div>
-  <div class="g3">
+  <!-- SECTION: NIFTY VALUATION -->
+  <div class="sec">Nifty 50 Valuation — P/E &amp; Market Cap</div>
+  <div class="g2">
+    <div class="cc"><div class="ch"><span class="ct">P/E Ratio</span><span class="cv" id="cPE">—</span></div><div class="cw"><canvas id="cPEchart"></canvas></div></div>
+    <div class="cc"><div class="ch"><span class="ct">Market Cap (USD Trillion)</span><span class="cv" id="cMCT">—</span></div><div class="cw"><canvas id="cMCTchart"></canvas></div></div>
+  </div>
+
+  <!-- SECTION: EARNING YIELD -->
+  <div class="sec">Earning Yield — Nifty 50, then Midcap 150 &amp; Smallcap 250</div>
+  <div class="g2">
+    <div class="cc sp2"><div class="ch"><span class="ct">Nifty 50 Earning Yield %</span><span class="cv" id="cEY">—</span></div><div class="cw"><canvas id="cEYchart"></canvas></div></div>
+  </div>
+  <div class="g2">
     <div class="cc"><div class="ch"><span class="ct">Midcap 150 Earning Yield %</span><span class="cv" id="cMEY">—</span></div><div class="cw"><canvas id="cMEYchart"></canvas></div></div>
     <div class="cc"><div class="ch"><span class="ct">Smallcap 250 Earning Yield %</span><span class="cv" id="cSEY">—</span></div><div class="cw"><canvas id="cSEYchart"></canvas></div></div>
-    <div class="cc"><div class="ch"><span class="ct">PREITY Ratio (Nifty/US10yr)</span><span class="cv" id="cPREITY">—</span></div><div class="cw"><canvas id="cPREITYchart"></canvas></div></div>
+  </div>
+
+  <!-- SECTION: VALUATION RATIOS -->
+  <div class="sec">Valuation Ratios — PREITY · BEER · MC/GDP</div>
+  <div class="g3">
+    <div class="cc"><div class="ch"><span class="ct">PREITY Ratio (PE × T-Bill)</span><span class="cv" id="cPREITY">—</span></div><div class="cw"><canvas id="cPREITYchart"></canvas></div></div>
+    <div class="cc"><div class="ch"><span class="ct">BEER Ratio</span><span class="cv" id="cBEER">—</span></div><div class="cw"><canvas id="cBEERchart"></canvas></div></div>
+    <div class="cc"><div class="ch"><span class="ct">MC/GDP % (Buffett)</span><span class="cv" id="cMC">—</span></div><div class="cw"><canvas id="cMCchart"></canvas></div></div>
   </div>
 
   <!-- SECTION 3: EPS GROWTH -->
-  <div class="sec">EPS — Nifty 50 YoY Growth &amp; Midcap / Smallcap EPS Level</div>
+  <div class="sec">Earnings — YoY Growth % (trailing 252 sessions ≈ 1 year)</div>
   <div class="g3">
     <div class="cc"><div class="ch"><span class="ct">Nifty 50 EPS Growth % (YoY)</span><span class="cv" id="cNEG">—</span></div><div class="cw"><canvas id="cNEGchart"></canvas></div></div>
+    <div class="cc"><div class="ch"><span class="ct">Midcap 150 EPS Growth % (YoY)</span><span class="cv" id="cMEGg">—</span></div><div class="cw"><canvas id="cMEGgchart"></canvas></div></div>
+    <div class="cc"><div class="ch"><span class="ct">Smallcap 250 EPS Growth % (YoY)</span><span class="cv" id="cSEGg">—</span></div><div class="cw"><canvas id="cSEGgchart"></canvas></div></div>
+  </div>
+
+  <div class="sec">Earnings — Absolute EPS Level (per index unit)</div>
+  <div class="g3">
+    <div class="cc"><div class="ch"><span class="ct">Nifty 50 EPS Level</span><span class="cv" id="cNEL">—</span></div><div class="cw"><canvas id="cNELchart"></canvas></div></div>
     <div class="cc"><div class="ch"><span class="ct">Midcap 150 EPS Level</span><span class="cv" id="cMEG">—</span></div><div class="cw"><canvas id="cMEGchart"></canvas></div></div>
     <div class="cc"><div class="ch"><span class="ct">Smallcap 250 EPS Level</span><span class="cv" id="cSEG">—</span></div><div class="cw"><canvas id="cSEGchart"></canvas></div></div>
   </div>
@@ -549,14 +574,14 @@ const charts={};
 function filterData(n){
   const len=RAW.date.length,start=n>=9999?0:Math.max(0,len-n);
   const sl=k=>RAW[k].slice(start);
-  return{date:sl('date'),nifty50:sl('nifty50'),pe:sl('pe'),pb:sl('pb'),
+  return{date:sl('date'),nifty50:sl('nifty50'),midcap150:sl('midcap150'),smallcap250:sl('smallcap250'),pe:sl('pe'),pb:sl('pb'),
     earning_yield:sl('earning_yield'),india_10yr:sl('india_10yr'),us_10yr:sl('us_10yr'),
     yield_gap:sl('yield_gap'),usdinr:sl('usdinr'),dollar_index:sl('dollar_index'),
     marketcap_gdp:sl('marketcap_gdp'),marketcap_trillion:sl('marketcap_trillion'),
     beer:sl('beer'),preity:sl('preity'),
     midcap_earn_yield:sl('midcap_earn_yield'),smallcap_earn_yield:sl('smallcap_earn_yield'),
-    nifty_eps_growth:sl('nifty_eps_growth'),
-    midcap_eps:sl('midcap_eps'),smallcap_eps:sl('smallcap_eps')};
+    eps:sl('eps'),midcap_eps:sl('midcap_eps'),smallcap_eps:sl('smallcap_eps'),
+    nifty_eps_growth:sl('nifty_eps_growth'),midcap_eps_growth:sl('midcap_eps_growth'),smallcap_eps_growth:sl('smallcap_eps_growth')};
 }
 
 function updateKPIs(d){
@@ -587,6 +612,8 @@ function updateKPIs(d){
   set('kSEG',d.smallcap_eps[n].toFixed(1));
 
   set('cN',nifty.toLocaleString('en-IN',{maximumFractionDigits:0}));
+  set('cMID',d.midcap150[n].toLocaleString('en-IN',{maximumFractionDigits:0}));
+  set('cSC',d.smallcap250[n].toLocaleString('en-IN',{maximumFractionDigits:0}));
   set('cPE',pe.toFixed(2)+'x');set('cEY',ey.toFixed(2)+'%');set('cBEER',beer.toFixed(3));
   set('cMC',mc.toFixed(1)+'%');set('cMCT','$'+mct.toFixed(2)+'T');
   set('cMEY',mey.toFixed(2)+'%');set('cSEY',sey.toFixed(2)+'%');
@@ -595,6 +622,10 @@ function updateKPIs(d){
   set('cNEG',(neg>=0?'+':'')+neg.toFixed(1)+'%');
   set('cMEG',d.midcap_eps[n].toFixed(1));
   set('cSEG',d.smallcap_eps[n].toFixed(1));
+  set('cNEL',d.eps[n].toFixed(1));
+  const meg=d.midcap_eps_growth[n],seg=d.smallcap_eps_growth[n];
+  set('cMEGg',(meg>=0?'+':'')+meg.toFixed(1)+'%');
+  set('cSEGg',(seg>=0?'+':'')+seg.toFixed(1)+'%');
 
   const peArr=RAW.pe,beerArr=RAW.beer.filter(x=>x>0),mcArr=RAW.marketcap_gdp.filter(x=>x>0),ygArr=RAW.yield_gap;
   setGauge('arcPE','pPE','vPE','zPE',pct(peArr,pe),pe,false,'#1d4634');
@@ -631,6 +662,8 @@ function buildCharts(d){
   }
 
   mk('nifty','cNifty',[lds(d.nifty50,'#1d4634',true,'cNifty')]);
+  mk('mid','cMidchart',[lds(d.midcap150,'#2c6e49',true,'cMidchart')]);
+  mk('sc','cSCchart',[lds(d.smallcap250,'#6b4a6e',true,'cSCchart')]);
   mk('pe','cPEchart',[lds(d.pe,'#1d4634',false),{data:ref(d.pe,STATS.pe_median),borderColor:'#9a732166',borderDash:[4,3],borderWidth:1,pointRadius:0,tension:0}],{min:15,max:30});
   mk('ey','cEYchart',[lds(d.earning_yield,'#2c6e49',true,'cEYchart')]);
   mk('beer','cBEERchart',[lds(d.beer,'#9a7321',false),{data:ref(d.beer,1.0),borderColor:'#a13c2b66',borderDash:[4,3],borderWidth:1,pointRadius:0,tension:0},{data:ref(d.beer,STATS.beer_median),borderColor:'#2c6e4966',borderDash:[4,3],borderWidth:1,pointRadius:0,tension:0}],{min:0.4,max:2.0});
@@ -659,6 +692,11 @@ function buildCharts(d){
     });
   }
   growthBar('neg','cNEGchart',negData,'#1d4634');
+  const megData=d.midcap_eps_growth.map(v=>v===0?null:v);
+  const segData=d.smallcap_eps_growth.map(v=>v===0?null:v);
+  growthBar('megg','cMEGgchart',megData,'#2c6e49');
+  growthBar('segg','cSEGgchart',segData,'#6b4a6e');
+  mk('nel','cNELchart',[lds(d.eps,'#1d4634',true,'cNELchart')]);
   mk('meg','cMEGchart',[lds(d.midcap_eps,'#2c6e49',true,'cMEGchart')]);
   mk('seg','cSEGchart',[lds(d.smallcap_eps,'#6b4a6e',true,'cSEGchart')]);
 }
@@ -755,7 +793,7 @@ def main():
     print(f"    Nifty {stats['nifty']:,.0f}  |  PE {stats['pe']:.2f}  |  MC ${stats['marketcap_trillion']:.2f}T")
     print(f"    Midcap EY {stats['midcap_earn_yield']:.2f}%  |  SC EY {stats['smallcap_earn_yield']:.2f}%")
     print(f"    Champion Signal: {champ['score']:.0f}/100 ({champ['label']})  →  expected 12M return {champ['exp_return']:+.1f}%")
-    print(f"    EPS Growth (Nifty YoY): {stats['nifty_eps_growth']:.1f}%  |  Midcap EPS: {stats['midcap_eps']:.1f}  SC EPS: {stats['smallcap_eps']:.1f}")
+    print(f"    EPS YoY Growth → Nifty {stats['nifty_eps_growth']:+.1f}%  Midcap {stats['midcap_eps_growth']:+.1f}%  SC {stats['smallcap_eps_growth']:+.1f}%")
 
 if __name__ == "__main__":
     main()
