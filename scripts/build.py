@@ -342,7 +342,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);
 .ct{font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text)}
 .cv{font-family:var(--serif);font-size:15px;font-weight:600;color:var(--green);font-feature-settings:'tnum'}
 .cw{height:135px;position:relative}
-.cw canvas{position:absolute;top:0;left:0;width:100%;height:100%}
+.cw canvas{display:block}
 .lgd{display:flex;gap:14px;margin-top:6px;flex-wrap:wrap}
 .li{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:8px;color:var(--muted);letter-spacing:.04em}
 .ld{width:7px;height:7px;border-radius:50%}
@@ -501,7 +501,7 @@ const GRID={color:'rgba(220,211,191,0.7)',lineWidth:1};
 const TICK={color:'#9aa499',maxTicksLimit:5};
 
 function bo(){
-  return{responsive:true,maintainAspectRatio:false,
+  return{responsive:true,maintainAspectRatio:false,resizeDelay:50,
     interaction:{mode:'index',intersect:false},
     plugins:{legend:{display:false},tooltip:{backgroundColor:'#fffefb',borderColor:'#dcd3bf',borderWidth:1,titleColor:'#15281e',bodyColor:'#6b7a6f',padding:8}},
     scales:{x:{grid:GRID,ticks:{...TICK,maxRotation:0,maxTicksLimit:6}},y:{grid:GRID,ticks:TICK}}};
@@ -710,6 +710,15 @@ function renderChampion(){
   document.getElementById('hitExpAvg').textContent=(c.exp_avg>=0?'+':'')+c.exp_avg+'%';
 }
 renderChampion();
+
+let _rzT;
+window.addEventListener('resize',function(){
+  clearTimeout(_rzT);
+  _rzT=setTimeout(function(){
+    const on=document.querySelector('.fb.on');
+    if(on)refresh(parseInt(on.dataset.r));
+  },150);
+});
 
 refresh(365);
 </script>
